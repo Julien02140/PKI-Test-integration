@@ -15,6 +15,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.exceptions import InvalidSignature
 from cryptography.x509 import load_pem_x509_certificate, RevokedCertificate
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.asymmetric import padding as pad
 import base64
 
 # Paramètres MQTT
@@ -92,14 +94,6 @@ def generate_certif_ca():
     with open(f'key/public_key_ca.pem', 'wb') as f:
         f.write(public_pem)
 
-    #le client et le vendeur ont accès aussi à la clé publique
-    with open(f'../client/key/public_key_ca.pem', 'wb') as f:
-        f.write(public_pem)
-
-    with open(f'../vendeur/key/public_key_ca.pem', 'wb') as f:
-        f.write(public_pem)
-
-
     #on doit aussi creer un fichier pem
     #ce fichier contient le certificat et la clé privée
     with open(f'pem/cert_ca.pem','wb') as c:
@@ -117,7 +111,7 @@ def verify_signature(csr_file):
         csr.public_key().verify(
             signature,
             tbs_certificate_bytes,
-            padding.PKCS1v15(),  # Utiliser le même padding que lors de la signature
+            pad.PKCS1v15(),  # Utiliser le même padding que lors de la signature
             csr.signature_hash_algorithm,
         )
         return True  # La signature est valide
@@ -181,17 +175,10 @@ def add_certificat_crl(name):
     with open("crl/crl.pem", "wb") as f:
         f.write(crl_serialize)
 
-def emit_certificate(csr_bytes,id):
+def emit_certificate(csr_bytes):
     # Charger la clé privée de la CA
     with open("pem/cert_ca.pem", "rb") as f:
         ca_cert_pem = f.read()
-    # with open("key/key_ca.key", "rb") as f:
-    #     ca_key_pem = f.read()
-    # ca_private_key = serialization.load_pem_private_key(
-    #     ca_key_pem,
-    #     password=None,
-    #     backend=default_backend()
-    # )
 
     # Générer une nouvelle clé RSA, pour simuler une signature falsifié
     private_key_false = rsa.generate_private_key(
@@ -263,7 +250,7 @@ def emit_certificate(csr_bytes,id):
 
     # Retourner le certificat émis
     cert_bytes = cert.public_bytes(serialization.Encoding.PEM)
-    with open(f'pem/cert_{id}.pem', 'wb') as c:
+    with open('certificat/cert_mouchard.pem', 'wb') as c:
         c.write(cert_bytes)
     return cert_bytes
 
@@ -281,84 +268,18 @@ def on_message(client, userdata, msg):
     json_data = msg.payload.decode('utf-8')
     message = json.loads(json_data)
 
-    if message['type'] == 'envoie_cle_AES_client':
-        #déchiffrer en utilisant la cle publique de la ca
-        id = dechiffre_message(message['id'])
-        AES_key = dechiffre_message(message['AES_key'])
-        AES_iv = dechiffre_message(message['AES_iv'])
+    if message['type'] == 'demande_certificat':
 
-        with open(f'key/AES_key_{id}') as AES_key_file:
-            AES_key_file.write(AES_key)
-
-        with open(f'key/AES_iv_{id}') as AES_iv_file:
-            AES_iv_file.write(AES_iv)
-
-        print(f'cle AES recu de la part du {id}')
-
-        reponse = {
-            'type' : 'retour_cle_AES_ca',
-            'id' : 'ca',
-        }
-
-    if message['type'] == 'envoie_cle_AES_client':
-
-        #obtention de la clé AES du client
-        print("cle AES du client recu")
-        AES_key = dechiffre_message(message['AES_key_client'])
-        AES_iv = dechiffre_message(message['AES_iv_client'])
-
-        with open(f"key/AES_key_{message['id']}_ca.pem", "wb") as f:
-            f.write(AES_key)
-
-        with open(f"key/AES_iv_{message['id']}_ca.pem", "wb") as f:
-            f.write(AES_iv)
-
-        print(f"clé AES du {message['id']} recu")
-
-        reponse = {
-            'type': 'retour_cle_AES_ca',
-            'id': 'ca'
-        }
-
-        json_data = json.dumps(reponse)
-        client.publish(f"vehicule/JH/{message['id']}",json_data)
-
-    if message['type'] == 'demande_connexion':
-        #obtention de la clé AES du vendeur
-        print("cle AES du vendeur recu")
-        AES_key_vendeur = dechiffre_message(message['AES_key_vendeur'])
-        AES_iv_vendeur = dechiffre_message(message['AES_iv_vendeur'])
-
-        with open(f"key/AES_key_{message['id']}_ca.bin", "wb") as f:
-            f.write(AES_key_vendeur)
-
-        with open(f"key/AES_iv_{message['id']}_ca.bin", "wb") as f:
-            f.write(AES_iv_vendeur)
-
-
-        print(f"clé AES du {message['id']} recu")
-
-        reponse = {
-            'type': 'connexion_acceptee',
-            'id': 'ca' 
-        }
-
-        print(f"demande de connexion reçu de la part du {message['id']}\n")
-        json_data = json.dumps(reponse)
-        client.publish(f"vehicule/JH/{message['id']}",json_data)
-        print("envoie connexion actepte à vendeur")
-
-    elif message['type'] == 'demande_certificat':
-
-        print(f"demande de certificat de la part du {message['id']} \n")
+        print(f"demande de certificat de la part du mouchard \n")
         csr = message.get('csr', None)
         #déchiffrer avec AES
-        csr = dechiffre_message_AES(message['id'],csr)
+        csr = dechiffre_message_AES(csr)
         csr = eval(csr.encode('utf-8'))
         print("verification de la signature du csr")
         if verify_signature(csr):
-            cert = str(emit_certificate(csr,message['id']))
-            cert_chiffre = chiffre_message_AES(message['id'],cert)
+            cert = str(emit_certificate(csr))
+            cert_bytes = cert.encode('utf-8')
+            cert_chiffre = chiffre_message_AES(cert_bytes)
             reponse = {
                 'type': 'envoi_certificat',
                 'id': 'ca',
@@ -366,7 +287,7 @@ def on_message(client, userdata, msg):
             }
             json_data = json.dumps(reponse)
             print("signature du csr correct")
-            client.publish(f"vehicule/JH/{message['id']}",json_data)
+            client.publish("vehicule/JH/mouchard}",json_data)
 
             # Pour créer le scénario où le client trouve que le certificat est révoqué dans la CRL
             #c'est le vendeur 3 qui a un certificat révoqué
@@ -427,35 +348,53 @@ def dechiffre_message(message64):
 
     return message_dechiffre
 
-def chiffre_message_AES(id_receveur,message):
+def chiffre_message_AES(message):
     #le message doit être en byte pour âtre chiffré
     #ne fonctionne pas avec les strings
-    with open(f'key/AES_key_{id_receveur}_ca.bin', 'rb') as AES_key_file:
-        AES_key_file.read()
+    if not isinstance(message,bytes):
+        message = message.encode('utf-8')
 
-    with open(f'key/AES_iv_{id_receveur}_ca.bin', 'rb') as AES_iv_file:
-        AES_iv_file.read()
+    with open(f'key/AES_key_mouchard_ca.bin', 'rb') as f:
+        AES_key_file = f.read()
+
+    with open(f'key/AES_iv_mouchard_ca.bin', 'rb') as f:
+        AES_iv_file = f.read()
 
     cipher = Cipher(algorithms.AES(AES_key_file), modes.CBC(AES_iv_file))
     encryptor = cipher.encryptor()
-    ct = encryptor.update(message) + encryptor.finalize()
+    padder = padding.PKCS7(algorithms.AES.block_size).padder()
+    padded_contenu = padder.update(message) + padder.finalize()
+    ct = encryptor.update(padded_contenu) + encryptor.finalize()
 
-    return ct
+    message_chiffre_base64 = base64.b64encode(ct).decode('utf-8')
 
-def dechiffre_message_AES(id_envoyeur,message):
-    with open(f'key/AES_key_{id_envoyeur}_ca.bin', 'rb') as AES_key_file:
-        AES_key_file.read()
+    return message_chiffre_base64
 
-    with open(f'key/AES_iv_{id_envoyeur}_ca.bin', 'rb') as AES_iv_file:
-        AES_iv_file.read()
+def dechiffre_message_AES(message):
+    # Décode le message chiffré en base64 en bytes
+    message_chiffre = base64.b64decode(message)
 
+    # Charger la clé et IV correspondants
+    with open(f'key/AES_key_mouchard_ca.bin', 'rb') as f:
+        AES_key_file = f.read()
+
+    with open(f'key/AES_iv_mouchard_ca.bin', 'rb') as f:
+        AES_iv_file = f.read()
+
+    # Configurer le chiffrement AES en mode CBC
     cipher = Cipher(algorithms.AES(AES_key_file), modes.CBC(AES_iv_file))
-
     decryptor = cipher.decryptor()
-    message_dechiffre = decryptor.update(message) + decryptor.finalize()
 
-    return message_dechiffre
+    # Déchiffrer le message
+    message_dechiffre = decryptor.update(message_chiffre) + decryptor.finalize()
 
+    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+    unpadded_message = unpadder.update(message_dechiffre) + unpadder.finalize()
+    
+    # Décoder le message déchiffré en utf-8
+    message_dechiffre_str = unpadded_message.decode('utf-8')
+
+    return message_dechiffre_str
 
 generate_certif_ca()
 

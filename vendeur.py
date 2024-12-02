@@ -245,12 +245,9 @@ def dechiffre_message(message):
 def chiffre_message_AES(id_receveur,message):
     #le message doit être en byte pour âtre chiffré
     #ne fonctionne pas avec les strings
-<<<<<<< HEAD
     if not isinstance(message,bytes):
         message = message.encode('utf-8')
 
-=======
->>>>>>> 5f71a092116e5dfdae0a1c105d842b6ce4142cce
     with open(f'key/AES_key_vendeur{numero_vendeur}_{id_receveur}.bin', 'rb') as f:
         AES_key_file = f.read()
 
