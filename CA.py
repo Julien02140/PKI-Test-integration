@@ -1,23 +1,15 @@
-#utiliser pyOpenSSL
-#https://www.youtube.com/watch?v=QhQFEmbRmsY
-#pour les communication, en https on peut creer une api flask
-#mais pour le projet, on utilise des fils mqtt
 import paho.mqtt.client as mqtt
 import paho.mqtt
-import ssl, time, inspect, os, json
+import os, json, base64
 from datetime import datetime, timezone, timedelta
 from cryptography import x509
 from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa,padding
-from cryptography.hazmat.backends import default_backend
+from cryptography.x509 import load_pem_x509_certificate
 from cryptography.exceptions import InvalidSignature
-from cryptography.x509 import load_pem_x509_certificate, RevokedCertificate
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes, serialization, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.primitives.asymmetric import padding as pad
-import base64
+from cryptography.hazmat.primitives.asymmetric import rsa, padding as pad
 
 # Paramètres MQTT
 mqtt_broker_address = "194.57.103.203"
@@ -85,18 +77,18 @@ def generate_certif_ca():
     if not os.path.exists("pem"):
         os.makedirs("pem")
 
-    with open(f'certificat/cert_ca.crt', 'wb') as c:
+    with open('certificat/cert_ca.crt', 'wb') as c:
         c.write(my_cert_pem)
 
-    with open(f'key/key_ca.key', 'wb') as c:
+    with open('key/key_ca.key', 'wb') as c:
         c.write(my_key_pem)
 
-    with open(f'key/public_key_ca.pem', 'wb') as f:
+    with open('key/public_key_ca.pem', 'wb') as f:
         f.write(public_pem)
 
     #on doit aussi creer un fichier pem
     #ce fichier contient le certificat et la clé privée
-    with open(f'pem/cert_ca.pem','wb') as c:
+    with open('pem/cert_ca.pem','wb') as c:
         c.write(my_cert_pem)
         c.write(my_key_pem) 
 
@@ -354,10 +346,10 @@ def chiffre_message_AES(message):
     if not isinstance(message,bytes):
         message = message.encode('utf-8')
 
-    with open(f'key/AES_key_mouchard_ca.bin', 'rb') as f:
+    with open('key/AES_key_mouchard_ca.bin', 'rb') as f:
         AES_key_file = f.read()
 
-    with open(f'key/AES_iv_mouchard_ca.bin', 'rb') as f:
+    with open('key/AES_iv_mouchard_ca.bin', 'rb') as f:
         AES_iv_file = f.read()
 
     cipher = Cipher(algorithms.AES(AES_key_file), modes.CBC(AES_iv_file))
@@ -375,10 +367,10 @@ def dechiffre_message_AES(message):
     message_chiffre = base64.b64decode(message)
 
     # Charger la clé et IV correspondants
-    with open(f'key/AES_key_mouchard_ca.bin', 'rb') as f:
+    with open('key/AES_key_mouchard_ca.bin', 'rb') as f:
         AES_key_file = f.read()
 
-    with open(f'key/AES_iv_mouchard_ca.bin', 'rb') as f:
+    with open('key/AES_iv_mouchard_ca.bin', 'rb') as f:
         AES_iv_file = f.read()
 
     # Configurer le chiffrement AES en mode CBC

@@ -1,18 +1,11 @@
 import paho.mqtt.client as mqtt
 import paho.mqtt
-import sys, json
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization, hashes
+import json, os, base64
 from cryptography import x509
 from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import padding, serialization, hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.primitives.asymmetric import padding as pad
-import sys,os,json
-import base64
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 mqtt_broker_address = "194.57.103.203"
 mqtt_broker_port = 1883
@@ -51,10 +44,10 @@ def generate_key():
     )
 
     # Écrire les clés dans des fichiers, on part du principe que la caait accès à la clé puyblique du mouchard
-    with open(f'key/private_key_mouchard.pem', 'wb') as f:
+    with open('key/private_key_mouchard.pem', 'wb') as f:
         f.write(private_pem)
 
-    with open(f'key/public_key_mouchard.pem', 'wb') as f:
+    with open('key/public_key_mouchard.pem', 'wb') as f:
         f.write(public_pem)
 
 def generate_key_aes():
@@ -62,15 +55,15 @@ def generate_key_aes():
     AES_key_mouchard_ca = os.urandom(32)
     AES_iv_mouchard_ca = os.urandom(16) 
 
-    with open(f'key/AES_key_mouchard_ca.bin',"wb") as f:
+    with open('key/AES_key_mouchard_ca.bin',"wb") as f:
         f.write(AES_key_mouchard_ca)
 
-    with open(f'key/AES_iv_mouchard_ca.bin','wb') as f:
+    with open('key/AES_iv_mouchard_ca.bin','wb') as f:
         f.write(AES_iv_mouchard_ca)
 
 def load_private_key():
     #charger la clé privée
-    with open(f'key/private_key_mouchard.pem', 'rb') as f:
+    with open('key/private_key_mouchard.pem', 'rb') as f:
         private_key_pem = f.read()
 
     private_key = serialization.load_pem_private_key(private_key_pem, password=None)
