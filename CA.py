@@ -16,6 +16,7 @@ mqtt_broker_address = "194.57.103.203"
 mqtt_broker_port = 1883
 mqtt_client_id = "ca_server_julien_hugo"
 topic = "vehicule/JH/ca"
+topic_mouchard = "vehicule/JH/mouchard"
 server_name = 'ca_server_julien_hugo'
 
 # nb_message_recu = 0
@@ -266,27 +267,37 @@ def on_message(client, userdata, msg):
         csr = message.get('csr', None)
         #déchiffrer avec AES
         csr = dechiffre_message_AES(csr)
-        csr = eval(csr.encode('utf-8'))
-        print("verification de la signature du csr")
-        if verify_signature(csr):
-            cert = str(emit_certificate(csr))
-            cert_bytes = cert.encode('utf-8')
-            cert_chiffre = chiffre_message_AES(cert_bytes)
+        if csr.startswith("Erreur : "):
+            print(csr)
             reponse = {
-                'type': 'envoi_certificat',
-                'id': 'ca',
-                'certificat': cert_chiffre
-            }
+                    'type': 'erreur',
+                    'id': 'ca',
+                    'erreur': csr
+                }
             json_data = json.dumps(reponse)
-            print("signature du csr correct")
-            client.publish("vehicule/JH/mouchard}",json_data)
+            client.publish(topic_mouchard,json_data)
+        else:
+            csr = eval(csr.encode('utf-8'))
+            print("verification de la signature du csr")
+            if verify_signature(csr):
+                cert = str(emit_certificate(csr))
+                cert_bytes = cert.encode('utf-8')
+                cert_chiffre = chiffre_message_AES(cert_bytes)
+                reponse = {
+                    'type': 'envoi_certificat',
+                    'id': 'ca',
+                    'certificat': cert_chiffre
+                }
+                json_data = json.dumps(reponse)
+                print("signature du csr correct")
+                client.publish(topic_mouchard,json_data)
 
-            # Pour créer le scénario où le client trouve que le certificat est révoqué dans la CRL
-            #c'est le vendeur 3 qui a un certificat révoqué
-            if message['id'] == 'vendeur3':
-                add_certificat_crl(message['id'])
-        else: 
-            print('Erreur avec la signature')
+                # Pour créer le scénario où le client trouve que le certificat est révoqué dans la CRL
+                #c'est le vendeur 3 qui a un certificat révoqué
+                if message['id'] == 'vendeur3':
+                    add_certificat_crl(message['id'])
+            else: 
+                print('Erreur avec la signature')
 
     elif message['type'] == 'demande_crl':
 
@@ -363,30 +374,55 @@ def chiffre_message_AES(message):
     return message_chiffre_base64
 
 def dechiffre_message_AES(message):
-    # Décode le message chiffré en base64 en bytes
-    message_chiffre = base64.b64decode(message)
+    try:
+        # Décode le message chiffré en base64 en bytes
+        try:
+            message_chiffre = base64.b64decode(message)
+        except base64.binascii.Error:
+            return "Erreur : Le message n'est pas un encodage Base64 valide."
 
-    # Charger la clé et IV correspondants
-    with open('key/AES_key_mouchard_ca.bin', 'rb') as f:
-        AES_key_file = f.read()
+        # Charger la clé AES
+        try:
+            with open('key/AES_key_mouchard_ca.bin', 'rb') as f:
+                AES_key_file = f.read()
+            with open('key/AES_iv_mouchard_ca.bin', 'rb') as f:
+                AES_iv_file = f.read()
+        except FileNotFoundError as e:
+            return f"Erreur : Fichier clé ou IV introuvable ({str(e)})."
 
-    with open('key/AES_iv_mouchard_ca.bin', 'rb') as f:
-        AES_iv_file = f.read()
+        # Vérification des tailles de clé et IV
+        if len(AES_key_file) not in {16, 24, 32}:
+            return "Erreur : La clé AES a une taille invalide."
+        if len(AES_iv_file) != 16:
+            return "Erreur : L'IV AES doit être de 16 octets."
 
-    # Configurer le chiffrement AES en mode CBC
-    cipher = Cipher(algorithms.AES(AES_key_file), modes.CBC(AES_iv_file))
-    decryptor = cipher.decryptor()
+        # Configurer le chiffrement AES en mode CBC
+        cipher = Cipher(algorithms.AES(AES_key_file), modes.CBC(AES_iv_file))
+        decryptor = cipher.decryptor()
 
-    # Déchiffrer le message
-    message_dechiffre = decryptor.update(message_chiffre) + decryptor.finalize()
+        # Déchiffrer le message
+        try:
+            message_dechiffre = decryptor.update(message_chiffre) + decryptor.finalize()
+        except ValueError:
+            return "Erreur : Déchiffrement impossible. Données corrompues ou clé/IV incorrects."
 
-    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
-    unpadded_message = unpadder.update(message_dechiffre) + unpadder.finalize()
-    
-    # Décoder le message déchiffré en utf-8
-    message_dechiffre_str = unpadded_message.decode('utf-8')
+        # Supprimer le padding
+        try:
+            unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+            unpadded_message = unpadder.update(message_dechiffre) + unpadder.finalize()
+        except ValueError:
+            return "Erreur : Padding invalide après le déchiffrement."
 
-    return message_dechiffre_str
+        # Décoder le message déchiffré en utf-8
+        try:
+            message_dechiffre_str = unpadded_message.decode('utf-8')
+        except UnicodeDecodeError:
+            return "Erreur : Le message déchiffré ne peut pas être décodé en UTF-8."
+
+        return message_dechiffre_str
+
+    except Exception as e:
+        return f"Erreur inattendue : {str(e)}"
 
 generate_certif_ca()
 

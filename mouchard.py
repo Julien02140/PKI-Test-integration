@@ -1,6 +1,6 @@
 import paho.mqtt.client as mqtt
 import paho.mqtt
-import json, os, base64
+import json, os, base64, time
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import padding, serialization, hashes
@@ -110,7 +110,6 @@ def chiffre_message_AES(message):
     padder = padding.PKCS7(algorithms.AES.block_size).padder()
     padded_contenu = padder.update(message) + padder.finalize()
     ct = encryptor.update(padded_contenu) + encryptor.finalize()
-
     message_chiffre_base64 = base64.b64encode(ct).decode('utf-8')
     return message_chiffre_base64
 
@@ -130,17 +129,26 @@ def dechiffre_message_AES(message):
 
     return message_dechiffre_str
 
+
+def on_connect(client, userdata, flags, reason_code, properties):
+    print("Connecté au broker MQTT avec le code de retour:", reason_code)
+    client.subscribe(topic)
+
 def on_message(client, userdata, msg):
     json_data = msg.payload.decode('utf-8')
     message = json.loads(json_data)
-
-    if message['type'] == 'envoi_certificat':
+    if message['type'] == 'erreur':
+        print(message['erreur'])
+    elif message['type'] == 'envoi_certificat':
 
         print("certificat recu de la part de la CA \n")
         cert = dechiffre_message_AES(message['certificat'])
         cert = eval(cert.encode('utf-8'))
         with open("certificat/cert_mouchard.pem", "wb") as f:
             f.write(cert)
+
+client.on_message = on_message
+client.on_connect = on_connect
 
 def test_csr():
     print("génération du csr et envoie du csr à la CA")
@@ -157,7 +165,23 @@ def test_csr():
         'id': 'mouchard',
         'csr': contenu_chiffre
     }
+    
+    json_data = json.dumps(message)
+    client.publish(topic_ca,json_data)
+    time.sleep(3)
 
+    print('Premier test')
+    # Teste le fait d'enlever des données
+    contenu_chiffre_modifie = contenu_chiffre[:-10]
+    message['csr'] = contenu_chiffre_modifie
+    json_data = json.dumps(message)
+    client.publish(topic_ca,json_data)
+    time.sleep(3)
+
+    print('Deuxième test')
+    # Teste le fait de modifier les données
+    contenu_chiffre_modifie = contenu_chiffre.replace('E','5')
+    message['csr'] = contenu_chiffre_modifie
     json_data = json.dumps(message)
     client.publish(topic_ca,json_data)
 
@@ -166,5 +190,9 @@ generate_key()
 generate_key_aes()
 
 print("démarrage du mouchard \n")
-print("test csr")
 test_csr()
+
+# client.loop_forever()
+
+
+
