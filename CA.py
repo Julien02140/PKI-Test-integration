@@ -173,14 +173,14 @@ def emit_certificate(csr_bytes):
     with open("pem/cert_ca.pem", "rb") as f:
         ca_cert_pem = f.read()
 
-    # Générer une nouvelle clé RSA, pour simuler une signature falsifié
-    private_key_false = rsa.generate_private_key(
+    # Générer une nouvelle clé RSA, pour simuler une signature falsifié pour le test
+    false_key = rsa.generate_private_key(
         public_exponent=65537,
         key_size=2048,
     )
 
     # Sérialiser la clé privée au format PEM
-    private_key_pem_false = private_key_false.private_bytes(
+    false_key_pem = false_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.TraditionalOpenSSL,
         encryption_algorithm=serialization.NoEncryption(),
@@ -188,12 +188,12 @@ def emit_certificate(csr_bytes):
 
     # Enregistrer la clé privée dans un fichier
     with open("private_key_false.pem", "wb") as f:
-        f.write(private_key_pem_false)
+        f.write(false_key_pem)
     
     with open("private_key_false.pem", "rb") as f:
         false_key = f.read()
 
-    private_key_false = serialization.load_pem_private_key(false_key, password=None)
+    false_key = serialization.load_pem_private_key(false_key, password=None)
 
 
     with open("key/key_ca.key", "rb") as f:

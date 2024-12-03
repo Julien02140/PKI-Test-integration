@@ -6,6 +6,9 @@ from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import padding, serialization, hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.asymmetric import rsa
+from datetime import datetime, timezone
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import padding as pad
 
 mqtt_broker_address = "194.57.103.203"
 mqtt_broker_port = 1883
@@ -129,7 +132,6 @@ def dechiffre_message_AES(message):
 
     return message_dechiffre_str
 
-
 def on_connect(client, userdata, flags, reason_code, properties):
     print("Connecté au broker MQTT avec le code de retour:", reason_code)
     client.subscribe(topic)
@@ -185,12 +187,47 @@ def test_csr():
     json_data = json.dumps(message)
     client.publish(topic_ca,json_data)
 
+def test_certificat():
+
+    with open('certificat/cert_mouchard.pem', 'rb') as f:
+        cert_byte = f.read()
+
+    cert = x509.load_pem_x509_certificate(cert_byte, default_backend())
+    # Vérifier si le certificat est encore valide
+    now = datetime.now(timezone.utc)
+
+    if now < cert.not_valid_before_utc or now > cert.not_valid_after_utc:
+        return False, "Le certificat n'est pas dans sa période de validité."
+    
+    print("date du certificat valide")
+
+    with open("key/public_key_ca.pem", "rb") as f:
+        ca_public_key = f.read()
+        
+    ca_public_key = serialization.load_pem_public_key(ca_public_key, backend=default_backend())
+
+    #On verifie la signature du certificat en utilisant la clé publique de la CA
+    try:
+        # Vérifiez la signature du certificat
+        ca_public_key.verify(
+            cert.signature,
+            cert.tbs_certificate_bytes,
+            pad.PKCS1v15(),
+            cert.signature_hash_algorithm,
+        )
+        print("signature valide")
+        return True
+    except Exception as e:
+        print(f"Erreur lors de la vérification de la signature : {e}")
+        return False  # La signature est invalide 
+
 #générer clé publique et privée et les clés aes du mouchard
 generate_key()
 generate_key_aes()
 
 print("démarrage du mouchard \n")
 test_csr()
+test_certificat()
 
 # client.loop_forever()
 
