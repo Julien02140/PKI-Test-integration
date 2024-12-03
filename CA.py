@@ -125,7 +125,7 @@ def add_certificat_crl(name):
         # print("certificat revoqué " + revoked_certificate + "\n")
         #builder = x509.CertificateRevocationListBuilder(builder)
 
-    with open(f"pem/cert_{name}.pem", "rb") as f:
+    with open(f"certificat/cert_{name}.pem", "rb") as f:
         cert_bytes = f.read()
 
     cert = x509.load_pem_x509_certificate(cert_bytes)
@@ -211,6 +211,7 @@ def emit_certificate(csr_bytes):
     basic_contraints = x509.BasicConstraints(ca=True, path_length=None)
     now = datetime.now(timezone.utc)
     # Signer le CSR avec la clé privée de la CA pour émettre le certificat
+    print(csr.subject)
     cert_build = (
         x509.CertificateBuilder()
             .subject_name(csr.subject)
@@ -292,12 +293,8 @@ def on_message(client, userdata, msg):
                 print("signature du csr correct")
                 client.publish(topic_mouchard,json_data)
 
-                # Pour créer le scénario où le client trouve que le certificat est révoqué dans la CRL
-                #c'est le vendeur 3 qui a un certificat révoqué
-                if message['id'] == 'vendeur3':
-                    add_certificat_crl(message['id'])
-            else: 
-                print('Erreur avec la signature')
+                #test
+                add_certificat_crl(message['id'])
 
     elif message['type'] == 'demande_crl':
 

@@ -219,7 +219,49 @@ def test_certificat():
         return True
     except Exception as e:
         print(f"Erreur lors de la vérification de la signature : {e}")
-        return False  # La signature est invalide 
+        return False  # La signature est invalide
+    
+#consulte la crl et regarde si le certificat est révoqué
+def test_crl():
+
+    with open('certificat/cert_mouchard.pem', 'rb') as f:
+        cert_byte = f.read()
+
+    cert = x509.load_pem_x509_certificate(cert_byte, default_backend())
+    #charger la clé publique de la CA
+    with open("key/public_key_ca.pem", "rb") as f:
+        ca_public_key = f.read()
+    
+    ca_public_key = serialization.load_pem_public_key(ca_public_key, backend=default_backend())
+
+    #charge le fichier crl
+    try:
+        with open("crl/crl.pem", "rb") as f:
+            crl = f.read()
+    except FileNotFoundError:
+        print("Erreur : il n'y pas de CRL pour le moment")
+        return
+
+    crl = x509.load_pem_x509_crl(crl, default_backend())
+
+    # Vérifier la signature de la CRL
+    try:
+        ca_public_key.verify(
+            crl.signature,
+            crl.tbs_certlist_bytes,
+            pad.PKCS1v15(),
+            crl.signature_hash_algorithm,
+        )
+        print("Signature de la CRL valide.")
+    except Exception as e:
+        print(f"Erreur lors de la vérification de la signature de la CRL : {e}")
+
+    for revoked_cert in crl:
+        if revoked_cert.serial_number == cert.serial_number:
+            print("Le certificat est révoqué.")
+            return True
+    print("Le certificat n'est pas révoqué.")
+    return False
 
 #générer clé publique et privée et les clés aes du mouchard
 generate_key()
@@ -228,6 +270,7 @@ generate_key_aes()
 print("démarrage du mouchard \n")
 test_csr()
 test_certificat()
+test_crl()
 
 # client.loop_forever()
 
