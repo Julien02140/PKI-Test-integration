@@ -111,7 +111,7 @@ def verify_signature(csr_file):
     except InvalidSignature:
         return False  # La signature est invalide
 
-def add_certificat_crl(name):
+def add_certificat_crl(cert):
     if not os.path.exists("crl"):
         os.makedirs("crl")
 
@@ -125,10 +125,6 @@ def add_certificat_crl(name):
         # print("certificat revoqué " + revoked_certificate + "\n")
         #builder = x509.CertificateRevocationListBuilder(builder)
 
-    with open(f"certificat/cert_{name}.pem", "rb") as f:
-        cert_bytes = f.read()
-
-    cert = x509.load_pem_x509_certificate(cert_bytes)
     builder = x509.CertificateRevocationListBuilder()
     builder = builder.issuer_name(x509.Name([
     x509.NameAttribute(NameOID.COMMON_NAME, 'JulienHugo CA CRL'),
@@ -222,25 +218,9 @@ def emit_certificate(csr_bytes):
             .not_valid_after(now + timedelta(days=365))
             .add_extension(basic_contraints,True)
             .add_extension(x509.SubjectAlternativeName(alt_names), False)
-            #.sign(private_key, hashes.SHA256(), default_backend())
     )
 
     cert = cert_build.sign(private_key, hashes.SHA256(), default_backend())
-
-      
-    # with open("key/key_ca.key", "rb") as f:
-    #     ca_key = f.read()
-
-    # private_key = serialization.load_pem_private_key(ca_key, password=None)
-    # signature = private_key.sign(
-    #     cert.encode('utf-8'),
-    #     padding.PSS(
-    #         mgf=padding.MGF1(hashes.SHA256()),
-    #         salt_length=padding.PSS.MAX_LENGTH
-    #     ),
-    #     hashes.SHA256()
-    # )
-
 
     # Retourner le certificat émis
     cert_bytes = cert.public_bytes(serialization.Encoding.PEM)
@@ -293,9 +273,6 @@ def on_message(client, userdata, msg):
                 print("signature du csr correct")
                 client.publish(topic_mouchard,json_data)
 
-                #test
-                add_certificat_crl(message['id'])
-
     elif message['type'] == 'demande_crl':
 
         id = message['id']
@@ -321,9 +298,68 @@ def on_message(client, userdata, msg):
         json_data = json.dumps(reponse)
         client.publish(f"vehicule/JH/{message['id']}",json_data)
 
+    elif message['type'] == 'verif_certificat':
+        #demande de vérification d'un certificat de la part d'un client
+        print("demande de vérificaiton de la part d'un client")
+        cert = dechiffre_message_AES(message['certificat'])
+        cert_byte = cert.encode('utf-8')
+        bool = verify_certificat(cert_byte)
+        print(bool)
+        if (bool == True):
+            reponse = "certificat valide"
+        else:
+            reponse = "certificat non valide ajout du certificat dans la crl"
+            cert = load_pem_x509_certificate(cert_byte, default_backend())
+            add_certificat_crl(cert)
+
+        print(reponse)
+
+        reponse_chiffre = chiffre_message_AES(reponse)
+
+        message = {
+            'type': 'reponse_verif_certificat',
+            'id': 'ca',
+            'reponse': reponse_chiffre
+        }
+
+        json_data = json.dumps(message)
+        client.publish("vehicule/JH/mouchard",json_data)
+
+
 def on_connect(client, userdata, flags, reason_code, properties):
     print("Connecté au broker MQTT avec le code de retour:", reason_code)
     client.subscribe(topic)
+
+def verify_certificat(cert):
+
+    cert = x509.load_pem_x509_certificate(cert, default_backend())
+    # Vérifier si le certificat est encore valide
+    now = datetime.now(timezone.utc)
+
+    if now < cert.not_valid_before_utc or now > cert.not_valid_after_utc:
+        return False, "Le certificat n'est pas dans sa période de validité."
+    
+    print("date du certificat valide")
+
+    with open("key/public_key_ca.pem", "rb") as f:
+        ca_public_key = f.read()
+        
+    ca_public_key = serialization.load_pem_public_key(ca_public_key, backend=default_backend())
+
+    #On verifie la signature du certificat en utilisant la clé publique de la CA
+    try:
+        # Vérifiez la signature du certificat
+        ca_public_key.verify(
+            cert.signature,
+            cert.tbs_certificate_bytes,
+            pad.PKCS1v15(),
+            cert.signature_hash_algorithm,
+        )
+        print("signature valide")
+        return True
+    except Exception as e:
+        print(f"Erreur lors de la vérification de la signature : {e}")
+        return False  # La signature est invalide
 
 def dechiffre_message(message64):
     with open('key/key_ca.key','rb') as f:

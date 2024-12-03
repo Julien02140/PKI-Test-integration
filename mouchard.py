@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from datetime import datetime, timezone
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import padding as pad
+from datetime import datetime, timezone, timedelta
 
 mqtt_broker_address = "194.57.103.203"
 mqtt_broker_port = 1883
@@ -117,20 +118,55 @@ def chiffre_message_AES(message):
     return message_chiffre_base64
 
 def dechiffre_message_AES(message):
-    with open('key/AES_key_mouchard_ca.bin', 'rb') as f:
-        AES_key_file = f.read()
+    try:
+        # Décode le message chiffré en base64 en bytes
+        try:
+            message_chiffre = base64.b64decode(message)
+        except base64.binascii.Error:
+            return "Erreur : Le message n'est pas un encodage Base64 valide."
 
-    with open('key/AES_iv_mouchard_ca.bin', 'rb') as f:
-        AES_iv_file = f.read()
+        # Charger la clé AES
+        try:
+            with open('key/AES_key_mouchard_ca.bin', 'rb') as f:
+                AES_key_file = f.read()
+            with open('key/AES_iv_mouchard_ca.bin', 'rb') as f:
+                AES_iv_file = f.read()
+        except FileNotFoundError as e:
+            return f"Erreur : Fichier clé ou IV introuvable ({str(e)})."
 
-    cipher = Cipher(algorithms.AES(AES_key_file), modes.CBC(AES_iv_file))
+        # Vérification des tailles de clé et IV
+        if len(AES_key_file) not in {16, 24, 32}:
+            return "Erreur : La clé AES a une taille invalide."
+        if len(AES_iv_file) != 16:
+            return "Erreur : L'IV AES doit être de 16 octets."
 
-    decryptor = cipher.decryptor()
-    message_dechiffre = decryptor.update(message) + decryptor.finalize()
+        # Configurer le chiffrement AES en mode CBC
+        cipher = Cipher(algorithms.AES(AES_key_file), modes.CBC(AES_iv_file))
+        decryptor = cipher.decryptor()
 
-    message_dechiffre_str = message_dechiffre.decode('utf-8')
+        # Déchiffrer le message
+        try:
+            message_dechiffre = decryptor.update(message_chiffre) + decryptor.finalize()
+        except ValueError:
+            return "Erreur : Déchiffrement impossible. Données corrompues ou clé/IV incorrects."
 
-    return message_dechiffre_str
+        # Supprimer le padding
+        try:
+            unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+            unpadded_message = unpadder.update(message_dechiffre) + unpadder.finalize()
+        except ValueError:
+            return "Erreur : Padding invalide après le déchiffrement."
+
+        # Décoder le message déchiffré en utf-8
+        try:
+            message_dechiffre_str = unpadded_message.decode('utf-8')
+        except UnicodeDecodeError:
+            return "Erreur : Le message déchiffré ne peut pas être décodé en UTF-8."
+
+        return message_dechiffre_str
+
+    except Exception as e:
+        return f"Erreur inattendue : {str(e)}"
 
 def on_connect(client, userdata, flags, reason_code, properties):
     print("Connecté au broker MQTT avec le code de retour:", reason_code)
@@ -148,6 +184,14 @@ def on_message(client, userdata, msg):
         cert = eval(cert.encode('utf-8'))
         with open("certificat/cert_mouchard.pem", "wb") as f:
             f.write(cert)
+
+    elif message['type'] == 'reponse_verif_certificat':
+        print("réponse de la ca pour la vérification du certificat")
+        reponse = dechiffre_message_AES(message['reponse'])
+        print(reponse)
+        #verification de la crl, on regarde si le faux certificat a bien été ajouté à la crl
+        test_crl()
+
 
 client.on_message = on_message
 client.on_connect = on_connect
@@ -223,8 +267,8 @@ def test_certificat():
     
 #consulte la crl et regarde si le certificat est révoqué
 def test_crl():
-
-    with open('certificat/cert_mouchard.pem', 'rb') as f:
+    print("test crl")
+    with open('certificat/cert_mouchard_false.pem', 'rb') as f:
         cert_byte = f.read()
 
     cert = x509.load_pem_x509_certificate(cert_byte, default_backend())
@@ -263,16 +307,91 @@ def test_crl():
     print("Le certificat n'est pas révoqué.")
     return False
 
+def generate_false_certificat():
+    with open("key/private_key_mouchard.pem", "rb") as f:
+        key = f.read()
+    
+    false_key = serialization.load_pem_private_key(key, password=None)
+
+    with open("csr/csr_mouchard.pem", "rb") as f:
+        csr_bytes = f.read()
+
+    csr = x509.load_pem_x509_csr(csr_bytes, default_backend())
+
+    alt_names = [x509.DNSName("mouchard_server")]
+    basic_contraints = x509.BasicConstraints(ca=True, path_length=None)
+    now = datetime.now(timezone.utc)
+    # Signer le CSR avec la clé privée du mouchard pour émettre le certificat falsifié
+    print(csr.subject)
+    cert_build = (
+        x509.CertificateBuilder()
+            .subject_name(csr.subject)
+            .issuer_name(
+                    x509.Name([
+                        x509.NameAttribute(NameOID.COMMON_NAME, "mouchard")
+                    ])
+                )
+            .public_key(csr.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now)
+            .not_valid_after(now + timedelta(days=365))
+            .add_extension(basic_contraints,True)
+            .add_extension(x509.SubjectAlternativeName(alt_names), False)
+    )
+
+    cert = cert_build.sign(false_key, hashes.SHA256(), default_backend())
+
+    # Sauvegarder le certificat falsifié dans un fichier PEM
+    with open('certificat/cert_mouchard_false.pem', 'wb') as f:
+        f.write(cert.public_bytes(serialization.Encoding.PEM))
+
+def envoi_false_certitficat():
+    with open('certificat/cert_mouchard_false.pem', 'rb') as f:
+        cert_bytes = f.read()
+
+        cert_chiffre = chiffre_message_AES(cert_bytes)
+        message = {
+            'type': 'verif_certificat',
+            'id': 'mouchard',
+            'certificat': cert_chiffre
+        }
+        json_data = json.dumps(message)
+        print("envoie du certificat falsifié")
+        client.publish(topic_ca,json_data)
+
+def envoi_good_certificat():
+        with open('certificat/cert_mouchard.pem', 'rb') as f:
+            cert_bytes = f.read()
+
+        cert_chiffre = chiffre_message_AES(cert_bytes)
+        message = {
+            'type': 'verif_certificat',
+            'id': 'mouchard',
+            'certificat': cert_chiffre
+        }
+        json_data = json.dumps(message)
+        print("envoie du bon certificat")
+        client.publish(topic_ca,json_data)
+
 #générer clé publique et privée et les clés aes du mouchard
 generate_key()
 generate_key_aes()
 
 print("démarrage du mouchard \n")
-test_csr()
-test_certificat()
-test_crl()
+test_csr() #demande de certificat de la part du mouchard
 
-# client.loop_forever()
+test_certificat() #on verifie que le certificat émit par la ca est valide
+
+#Le mouchard va simuler un client et va demandé à la ca si le certificat du mouchard est valide
+envoi_good_certificat()
+
+#le mouchard va créer son propre certificat auto signé, un "mauvais" certificat pour tester la réacion de la ca
+generate_false_certificat()
+
+#le mouchard va simuler un client et va demandé si le certificat falsifié qu'il vient de creer est valide
+envoi_false_certitficat()
+
+client.loop_forever()
 
 
 
